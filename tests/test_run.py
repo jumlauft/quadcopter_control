@@ -1,5 +1,5 @@
 from src import run
 
 def test_main():
-    run.main(False)
+    run.main(True)
 

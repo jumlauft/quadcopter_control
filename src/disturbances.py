@@ -52,3 +52,27 @@ def gaussians(x):
         + 0.8 * mv11 * (np.random.rand(n) - 2.5) \
         + 0.3 * mv10 * (np.random.rand(n) - 3.5)
     return np.concatenate((np.zeros((n, 2)), w.reshape(n, 1)), axis=1)
+
+
+def gaussiansL(x):
+    """ Synthetic disturbance model build of Gaussians
+
+    Args:
+        x: current input nparray [n,2]
+
+    Returns:
+        disturbance as nparray [n,3]
+    """
+    from scipy.stats import multivariate_normal
+    if x.ndim == 1:
+        x = x[0:2].reshape(-1, 2)
+    n = x.shape[0]
+    sigma = np.array([[0.01, 0], [0, 0.01]])
+    c = np.sqrt(((2 * np.pi) ** 2) * np.linalg.det(sigma))
+    mv11 = multivariate_normal(mean=[1, 1], cov=sigma).pdf(x[:, 0:2]) * c
+    mv00 = multivariate_normal(mean=[0, 0], cov=sigma).pdf(x[:, 0:2]) * c
+    mv10 = multivariate_normal(mean=[1, 0], cov=sigma).pdf(x[:, 0:2]) * c
+    w = 0.6 * mv00 * (np.random.rand(n) - 2.5) \
+        + 0.8 * mv11 * (np.random.rand(n) - 2.5) \
+        + 0.3 * mv10 * (np.random.rand(n) - 3.5)
+    return np.concatenate((np.zeros((n, 2)), w.reshape(n, 1)), axis=1)

@@ -31,16 +31,16 @@ def check_input(func):
     return wrapper_check_input
 
 
-class DistModel:
+class DistModel_NoEpi:
     TRAIN_EPOCHS = 2
     TRAIN_ITER = 2
     N_HIDDEN = 50
     LEARNING_RATE = 0.01
     SCALE_OFFSET = 1e-9
     MIN_ADD_DATA_RATE = 0.
-    N_EPI = 1000
+    N_EPI = 1
     TRAIN_LIM = 1
-
+    EPI_CONST = 0.145
     def __init__(self, dx, dy, input_lb, input_up):
         """ Online disturbance model to differentiate types of uncertainties
 
@@ -55,9 +55,6 @@ class DistModel:
             DY (int): output dimension
             INPUT_LB (list): length of DX list of minimal inputs
             INPUT_UB (list): length of DX list of maximal outputs
-            x_epi (numpy array): input locations where no data is available
-            y_epi (numpy array): output indicating high/low uncertainty
-            _scaler (sklearn scaler): scaler for data
             loss (list): loss over training epochs
             _train_counter (int): counts number of added points until retraining
 
@@ -77,32 +74,12 @@ class DistModel:
         self.DY = dy
         self.INPUT_LB = input_lb
         self.INPUT_UB = input_up
-        self.x_epi = self._generate_rand_epi(self.N_EPI)
-        self.y_epi = np.ones((self.N_EPI, 1))
-        self._scaler = StandardScaler()
         self._train_counter = 0
         self.loss = []
-
-        self._scaler.fit(self.x_epi)
-        self.model_out, self.model_epi, self.model_mean, self.model_ale, \
+        self.x_epi = np.zeros((self.N_EPI,dx))
+        self.y_epi = np.ones((self.N_EPI, 1))
+        self.model_out, self.model_mean, self.model_ale, \
             self.model_mix, self.model_all = self._setup_nn
-
-    def _generate_rand_epi(self, n):
-        """ Generates random input locations for epistemic uncertainty measure
-
-        Uniformly distributes data points across the input space defined by
-        INPUT_LB and INPUT_UB
-
-
-        Args:
-            n (int): Number of points to be generated
-
-        Returns:
-            [n, DX] numpy array
-
-        """
-        lim = np.array([self.INPUT_LB, self.INPUT_UB])
-        return (lim[1, :] - lim[0, :]) * np.random.rand(n, self.DX) + lim[0, :]
 
     @property
     def _setup_nn(self):
@@ -128,7 +105,6 @@ class DistModel:
 
         mulay = Dense(self.DY)(hidden)
         stdlay = Dense(self.DY)(hidden)
-        epilay = Dense(1, activation='sigmoid')(hidden)
 
         def negloglik(y, p_y):
             return -p_y.log_prob(y)
@@ -144,12 +120,6 @@ class DistModel:
         model_out.compile(
             optimizer=tf.optimizers.RMSprop(learning_rate=self.LEARNING_RATE),
             loss=negloglik)
-        model_epi = Model(inputs=inp, outputs=epilay)
-        model_epi.compile(
-            optimizer=tf.optimizers.RMSprop(learning_rate=self.LEARNING_RATE),
-            loss='binary_crossentropy')
-        model_epi.fit(self._scaler.transform(self.x_epi), self.y_epi,
-                      epochs=self.TRAIN_EPOCHS, verbose=0)
 
         model_mix = Model(inputs=inp, outputs=[mulay, out])
         model_mix.compile(
@@ -161,8 +131,8 @@ class DistModel:
             loss='mse')
         model_ale = Model(inputs=inp, outputs=stdlay)
 
-        model_all = Model(inputs=inp, outputs=[mulay, stdlay, epilay])
-        return model_out, model_epi, model_mean, model_ale, model_mix, model_all
+        model_all = Model(inputs=inp, outputs=[mulay, stdlay])
+        return model_out, model_mean, model_ale, model_mix, model_all
 
     def train(self):
         """ Trains the neural network based on the current data
@@ -171,23 +141,12 @@ class DistModel:
         epistemic uncertainty output
 
         """
-        self._update_xy_epi()
-        cw = compute_class_weight('balanced', np.unique(self.y_epi),
-                                  self.y_epi.flatten())
-        xepis = self._scaler.fit_transform(self.x_epi)
-        xtrs = self._scaler.transform(self.Xtr)
         for i in range(self.TRAIN_ITER):
             # hist = self.model_out.fit(self.Xtr, self.Ytr, **kwargs)
-            hist_epi = self.model_epi.fit(xepis, self.y_epi, class_weight=cw,
-                                          epochs=self.TRAIN_EPOCHS, verbose=0)
-            hist = self.model_mix.fit(xtrs, [self.Ytr, self.Ytr],
+            hist = self.model_mix.fit(self.Xtr, [self.Ytr, self.Ytr],
                                       epochs=self.TRAIN_EPOCHS, verbose=0)
 
-            if np.isnan(hist_epi.history['loss']).any():
-                print('detected Nan')
-            self.loss = self.loss + hist.history['loss'] + hist_epi.history[
-                'loss']
-
+            self.loss = self.loss + hist.history['loss']
         print('retrained disturbance model with ' + str(
             self.Xtr.shape[0]) + ' data points')
 
@@ -201,7 +160,8 @@ class DistModel:
         Returns:
             mean, aleatoric uncertainty, epistemic uncertainty
         """
-        mean, ale, epi = self.model_all.predict(self._scaler.transform(x))
+        mean, ale = self.model_all.predict(x)
+        epi = self.EPI_CONST*np.ones_like(ale)
         return mean.flatten(), self.SCALE_OFFSET + np.array(
             tf.math.softplus(ale.flatten())), epi.flatten()
 
@@ -215,7 +175,7 @@ class DistModel:
         Returns:
             mean prediction
         """
-        return self.model_mean.predict(self._scaler.transform(x)).flatten()
+        return self.model_mean.predict(x).flatten()
 
     @check_input
     def predict_aleatoric(self, x):
@@ -228,7 +188,7 @@ class DistModel:
             aleatoric uncertainty prediction
         """
         return np.array(self.SCALE_OFFSET + tf.math.softplus(
-            self.model_ale.predict(self._scaler.transform(x)))).flatten()
+            self.model_ale.predict(x))).flatten()
 
     @check_input
     def predict_epistemic(self, x):
@@ -240,7 +200,7 @@ class DistModel:
         Returns:
             epistemic uncertainty prediction
         """
-        return self.model_epi.predict(self._scaler.transform(x)).flatten()
+        return self.EPI_CONST*np.ones(x.shape[0])
 
     def _select_data(self, x, epi_pred=None):
         """ Filters data added to the model based on epistemic uncertainty
@@ -296,24 +256,6 @@ class DistModel:
             self.train()
             self._train_counter -= self.TRAIN_LIM
 
-    def _update_xy_epi(self):
-        """ Generates artificial data points for epistemic uncertainty estimate
-
-        """
-        ntr = self.Xtr.shape[0]
-
-        # Generate uncertain points
-        self.x_epi = self._generate_rand_epi(self.N_EPI + ntr)
-        self.y_epi = np.ones((self.N_EPI + ntr, 1))
-
-        # find closest uncertain points
-        d = self.x_epi.reshape(1, -1, self.DX) - self.Xtr.reshape(-1, 1, self.DX)
-        distance = np.sum(d ** 2, axis=2)
-        idx = np.argpartition(distance.min(axis=0), ntr)
-
-        # turn into certain points
-        self.y_epi[idx[:ntr], :] = 0
-        self.x_epi[idx[:ntr], :] = self.Xtr
 
     def evaluate(self, dis):
         ndtr = 20

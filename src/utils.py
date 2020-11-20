@@ -34,18 +34,31 @@ def classvar2file(class_to_store, fout):
 def data2csv(fout, **kwargs):
     import pandas as pd
     import numpy as np
+    from scipy.signal import resample
     dfs = []
-    for name in kwargs:
-        try:
-            if type(kwargs[name]) is list:
-                kwargs[name] = np.array(kwargs[name])
-            if kwargs[name].ndim == 1:
-                dfs.append(pd.DataFrame(data = kwargs[name], columns = [name]))
-            elif kwargs[name].ndim == 2:
-                for i, col in enumerate(kwargs[name].T):
-                    dfs.append(pd.DataFrame(data=col, columns=[name + '_' + str(i)]))
+    N_MAX = 3600
+    for name,var in kwargs.items():
+        if type(var) is list:
+            var = np.array(var)
+        if isinstance(var, float) or isinstance(var, int):
+            var = np.array([var])
+        if type(var) is tuple and len(var) == 3:
+            for i, x in enumerate(var):
+                xnan = np.concatenate((x,np.array([np.nan]*x.shape[0]).reshape(-1,1)),axis = 1)
+                dfs.append(pd.DataFrame(xnan.reshape(-1,1), columns = [name + '_surf_' + str(i)]))
+        elif type(var) is np.ndarray:
+            if var.ndim == 1:
+                data = var if var.shape[0] < N_MAX else resample(var,N_MAX)
+                dfs.append(pd.DataFrame(data=data, columns=[name]))
+            elif var.ndim == 2:
+                for i, c in enumerate(var.T):
+                    data = c if c.shape[0] < N_MAX else resample(c, N_MAX)
+                    dfs.append(pd.DataFrame(data=data, columns=[name + '_' + str(i)]))
             else:
-                raise Exception("must be 1 or 2 dimensional")
-        except:
+                raise Exception("ndarray must be 1 or 2 dimensional")
+        else:
             print('Ignored ' + name)
-    pd.concat(dfs,axis=1).to_csv(fout)
+    df = pd.concat(dfs, axis=1)
+    if df.shape[0] > N_MAX:
+        print('Found large rows, Might conflict with tikz surf plot')
+    df.to_csv(fout)

@@ -8,7 +8,9 @@ def x_vs_xd(t, x, x_des):
     plt.ylabel('x, x_des')
     plt.plot(t, x[:, 0:3])
     plt.plot(t, x_des, '--')
-    plt.show()
+    rmse_z = np.sqrt(np.mean((x[:, 2]-x_des[:,2])**2))
+    plt.title('RMSE_Z: ' + str(rmse_z))
+    return rmse_z
 
 
 def training_set(dmodel):
@@ -16,31 +18,32 @@ def training_set(dmodel):
     ax = data_fig.add_subplot(111, projection='3d')
     ax.set_title('Measured disturbance')
     ax.scatter(dmodel.Xtr[:, 0], dmodel.Xtr[:, 1], dmodel.Ytr)
-    plt.show()
 
 
 def dis_model_surf(dmodel):
-    ndte = 50
+    ndte = 60
     x1, x2 = np.meshgrid(np.linspace(-0.1, 0.2, ndte),
                          np.linspace(-0.1, 0.2, ndte))
-    x = np.concatenate((x1.reshape(-1, 1), x2.reshape(-1, 1)), axis=1)
+    xte = np.concatenate((x1.reshape(-1, 1), x2.reshape(-1, 1)), axis=1)
 
-    mean, ale, epi = dmodel.predict(x)
-
+    mean, ale, epi = dmodel.predict(xte)
+    meanq, aleq, epiq = mean.reshape(ndte, ndte),ale.reshape(ndte, ndte),epi.reshape(ndte, ndte)
     modelfig = plt.figure(figsize=(15, 5))
     ax = modelfig.add_subplot(131, projection='3d')
     ax.set_title('Model Mean')
-    ax.plot_surface(x1, x2, mean.reshape(ndte, ndte), alpha=0.5)
+    ax.plot_surface(x1, x2, meanq, alpha=0.5)
 
     ax = modelfig.add_subplot(132, projection='3d')
     ax.set_title('Model Aleatoric Uncertainty')
-    ax.plot_surface(x1, x2, ale.reshape(ndte, ndte), alpha=0.5)
+    ax.plot_surface(x1, x2, aleq, alpha=0.5)
 
     ax = modelfig.add_subplot(133, projection='3d')
     ax.set_title('Model Epistemic Uncertainty')
-    ax.plot_surface(x1, x2, epi.reshape(ndte, ndte), alpha=0.5)
-    plt.show()
-
+    ax.plot_surface(x1, x2, epiq, alpha=0.5)
+    # import tikzplotlib
+    # tikzplotlib.save("test.tex")
+    return xte, mean, ale, epi
+    # return (x1,x2,mean),(x1,x2,ale),(x1,x2,epi)
 
 def dis_model_x(dmodel, dis, x):
     mean_model, ale_model, epi_model = dmodel.predict(x)
@@ -67,7 +70,6 @@ def dis_model_x(dmodel, dis, x):
     ax.scatter(x[:, 0], x[:, 1], epi_model, color="blue")
     ax.scatter(dmodel.x_epi[:, 0], dmodel.x_epi[:, 1], dmodel.y_epi[:, 0],
                color='red')
-    plt.show()
     return mean_model, ale_model, epi_model, mean_true, ale_true
 
 
@@ -76,4 +78,6 @@ def training_loss(dmodel):
     plt.xlabel('epochs')
     plt.ylabel('loss')
     plt.plot(dmodel.loss)
+def show():
     plt.show()
+
